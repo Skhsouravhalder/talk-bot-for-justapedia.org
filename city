@@ -1,0 +1,80 @@
+import pywikibot
+import requests
+import time
+
+def fetch_city_streets(city_name):
+    try:
+        headers = {
+            'User-Agent': 'JustWikiBot/1.0 (your_email@example.com)'  # Replace with your contact info
+        }
+        # Query Nominatim to get all streets in the city
+        response = requests.get(
+            f'https://nominatim.openstreetmap.org/search?city={city_name}&street=&format=json&polygon_geojson=1&limit=500',
+            headers=headers
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data if data else None
+    except requests.exceptions.RequestException as e:
+        print(f"Request failed: {e}")
+        return None
+    except ValueError:
+        print("Error: Response is not valid JSON")
+        return None
+
+def create_street_article(street_name, city_name, data):
+    article_content = f"""
+    {{Automated article}}
+
+    {{Infobox Price Chopper
+    | coordinates = {data.get('lat', 'Unknown')}, {data.get('lon', 'Unknown')}
+    | name = {street_name}
+    | image = 
+    | storenumber = 
+    | location = {data.get('display_name', 'Unknown')}
+    | address = TBD
+    | city_state = {city_name}, {data.get('display_name', 'Unknown')}
+    | opened = TBD
+    | closed = TBD
+    | store_type = TBD
+    | licensee = TBD
+    | replaced = TBD
+    | replaced_by = TBD
+    | previous = TBD
+    | next = TBD
+    }}
+
+    '''{street_name}''' is a street in {city_name}, located in {data.get('display_name', 'Unknown')}.
+    This article was automatically generated and may need further review or updates.
+
+    ==References==
+    {{reflist}}
+
+    [[Category:Price Chopper stores in New York]]
+    [[Category:Supermarkets in Clay, New York]]
+    """
+    return article_content
+
+def main():
+    site = pywikibot.Site('en', 'justwiki')  # Replace 'en' with the language code if necessary
+    city_name = "New York City"  # Replace with your desired city name
+
+    # Fetch all streets in the specified city
+    streets_data = fetch_city_streets(city_name)
+    
+    if streets_data:
+        for street in streets_data:
+            street_name = street.get('display_name', 'Unknown')
+            page = pywikibot.Page(site, street_name)
+            if not page.exists():  # Only create the page if it doesn't already exist
+                article_content = create_street_article(street_name, city_name, street)
+                page.text = article_content
+                page.save(f"Created article for {street_name}")
+            else:
+                print(f"The page for {street_name} already exists.")
+            time.sleep(1)  # Add delay to respect API rate limits
+    else:
+        print(f"No streets found for {city_name}")
+
+if __name__ == "__main__":
+    main()
