@@ -1,0 +1,39 @@
+import pywikibot
+from googletrans import Translator  # Install googletrans==4.0.0-rc1 for compatibility
+
+# Initialize translator
+translator = Translator()
+
+# Configure your wiki
+site = pywikibot.Site('bn', 'wsour')  # Replace with your wiki config
+site.login()
+
+def translate_and_save(page_title, source_lang='en', target_lang='bn'):
+    # Fetch the page
+    page = pywikibot.Page(site, page_title)
+    
+    if not page.exists():
+        print(f"Page '{page_title}' does not exist.")
+        return
+    
+    # Translate content
+    try:
+        translated_text = translator.translate(page.text, src=source_lang, dest=target_lang).text
+    except Exception as e:
+        print(f"Translation failed: {e}")
+        return
+
+    # Create a new page for the translated content
+    translated_page_title = f"{page_title} (Hindi)"
+    translated_page = pywikibot.Page(site, translated_page_title)
+
+    # Save translated content to the new page
+    try:
+        translated_page.text = translated_text
+        translated_page.save(summary="Translated from Bangla to Hindi using Pywikibot and Google Translate")
+        print(f"Page '{translated_page_title}' created successfully.")
+    except Exception as e:
+        print(f"Error saving page '{translated_page_title}': {e}")
+
+# Example usage: Translate and save a page
+translate_and_save("Sourav")  # Replace with your Bangla page title
