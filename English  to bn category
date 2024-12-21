@@ -1,0 +1,76 @@
+import pywikibot
+from googletrans import Translator  # Install googletrans==4.0.0-rc1 for compatibility
+import time
+
+# Initialize translator
+translator = Translator()
+
+# Configure your wiki
+site = pywikibot.Site('bn', 'wikipedia')  # Target site for Bangla content
+site.login()
+
+def translate_and_save_category(category_name, source_lang='en', target_lang='bn'):
+    """
+    Translate and save pages from a specified category from English to Bangla, including titles.
+    
+    Args:
+        category_name (str): Name of the category to fetch pages from.
+        source_lang (str): Source language code (default 'en' for English).
+        target_lang (str): Target language code (default 'bn' for Bangla).
+    """
+    # Fetch category
+    category = pywikibot.Category(site, f"Category:{category_name}")
+    if not category.exists():
+        print(f"Category '{category_name}' does not exist.")
+        return
+
+    # Iterate over pages in the category
+    for page in category.articles():
+        print(f"Processing page: {page.title()}")
+
+        # Translate page title
+        try:
+            translated_title = translator.translate(page.title(), src=source_lang, dest=target_lang).text
+            if not translated_title:
+                print(f"Translation returned empty title for '{page.title()}', skipping.")
+                continue
+        except Exception as e:
+            print(f"Translation failed for title '{page.title()}': {e}")
+            continue
+
+        # Check if the page has content
+        if not page.text.strip():
+            print(f"Page '{page.title()}' is empty, skipping.")
+            continue
+
+        # Translate page content
+        try:
+            translated_text = translator.translate(page.text, src=source_lang, dest=target_lang).text
+            if not translated_text:
+                print(f"Translation returned empty text for '{page.title()}', skipping.")
+                continue
+        except Exception as e:
+            print(f"Translation failed for '{page.title()}': {e}")
+            continue
+
+        # Create or update a new page for the translated content
+        translated_page_title = translated_title
+        translated_page = pywikibot.Page(site, translated_page_title)
+
+        try:
+            if translated_page.exists():
+                print(f"Page '{translated_page_title}' exists. Updating content.")
+            else:
+                print(f"Page '{translated_page_title}' does not exist. Creating new page.")
+            
+            translated_page.text = translated_text
+            translated_page.save(summary=f"Translated from English to Bangla (title and content) using Pywikibot and Google Translate")
+            print(f"Page '{translated_page_title}' updated successfully.")
+        except Exception as e:
+            print(f"Error saving page '{translated_page_title}': {e}")
+        
+        # Add delay to avoid rate limiting
+        time.sleep(5)
+
+# Example usage: Translate and save all pages in a category
+translate_and_save_category("Philosophy", source_lang='en', target_lang='bn')  # Replace 'Living people' with your English category name
