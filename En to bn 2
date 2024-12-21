@@ -1,0 +1,200 @@
+#!/usr/bin/python
+r"""
+This script transfers pages from English Wikipedia to Bangla Wikipedia and
+automatically translates the page content from English to Bangla using Google Translate,
+while preserving content inside <ref></ref> and {{}} tags.
+
+The following parameters are supported:
+
+-tolang:          The target site code (Bangla Wikipedia in this case).
+
+-tofamily:        The target site family.
+
+-prefix:          Page prefix on the new site.
+
+-overwrite:       Existing pages are skipped by default. Use this option to
+                  overwrite pages.
+
+-target           Use page generator of the target site
+
+
+Internal links are *not* repaired!
+
+Pages to work on can be specified using any of:
+
+&params;
+
+Examples
+--------
+
+Transfer all pages in category "Query service" from the English Wikipedia to
+the Bangla Wikipedia, adding "Bangla:Import enwp/" as prefix:
+
+    python pwb.py transferbot -family:wikipedia -lang:en -cat:"Query service" \
+        -tofamily:wikipedia -tolang:bn -prefix:"Bangla:Import enwp/"
+
+Copy the template "Query service" from the English Wikipedia to the
+Bangla Wikipedia:
+
+    python pwb.py transferbot -family:wikipedia -lang:en \
+        -tofamily:wikipedia -tolang:bn -page:"Template:Query service"
+
+"""
+#
+# (C) Pywikibot team, 2014-2021
+#
+# Distributed under the terms of the MIT license.
+#
+import pywikibot
+from pywikibot import pagegenerators
+from pywikibot.bot import suggest_help
+from googletrans import Translator  # Import Google Translate module
+import re
+
+docuReplacements = {'&params;': pagegenerators.parameterHelp}  # noqa: N816
+
+
+def main(*args) -> None:
+    """
+    Process command line arguments and invoke bot.
+
+    If args is an empty list, sys.argv is used.
+
+    :param args: command line arguments
+    :type args: str
+    """
+    local_args = pywikibot.handle_args(args)
+
+    fromsite = pywikibot.Site()
+    tolang = fromsite.code
+    tofamily = fromsite.family.name
+    prefix = ''
+    overwrite = False
+    target = False
+    gen_args = []
+
+    for arg in local_args:
+        if arg.startswith('-tofamily'):
+            tofamily = arg[len('-tofamily:'):];
+        elif arg.startswith('-tolang'):
+            tolang = arg[len('-tolang:'):];
+        elif arg.startswith('-prefix'):
+            prefix = arg[len('-prefix:'):];
+        elif arg == '-overwrite':
+            overwrite = True
+        elif arg == '-target':
+            target = True
+        else:
+            gen_args.append(arg)
+
+    # Setup the target site (Bangla Wikipedia)
+    tosite = pywikibot.Site(tolang, tofamily)
+    additional_text = ('Target site not different from source site.'
+                       if fromsite == tosite else '')
+
+    gen_factory = pagegenerators.GeneratorFactory(site=tosite if target
+                                                  else fromsite)
+    unknown_args = [arg for arg in gen_args if not gen_factory.handle_arg(arg)]
+
+    gen = gen_factory.getCombinedGenerator()
+
+    if suggest_help(missing_generator=not gen,
+                    additional_text=additional_text,
+                    unknown_parameters=unknown_args):
+        return
+
+    gen_args = ' '.join(gen_args)
+    pywikibot.output("""
+    Page transfer configuration
+    ---------------------------
+    Source: {fromsite}
+    Target: {tosite}
+
+    Generator of pages to transfer: {gen_args}
+    {target}
+    Prefix for transferred pages: {prefix}
+    """.format(fromsite=fromsite, tosite=tosite, gen_args=gen_args,
+               prefix=prefix if prefix else '(none)',
+               target='from target site\n' if target else ''))
+
+    # Initialize the Google Translator
+    translator = Translator()
+
+    for page in gen:
+        title = page.namespace().canonical_prefix() + page.title(with_ns=False)
+        if target:
+            # page is at target site, fetch it from source
+            target_title = prefix + page.title()
+            page = pywikibot.Page(fromsite, title)
+        else:
+            target_title = (prefix + title)
+        targetpage = pywikibot.Page(tosite, target_title.replace("Draft:", ""))
+        edithistpage = pywikibot.Page(tosite, target_title + '/edithistory')
+
+        if targetpage.exists():
+            if not overwrite:
+                pywikibot.warning(
+                    'Skipped {} (target page {} exists)'.format(
+                        page.title(as_link=True, force_interwiki=True),
+                        targetpage.title(as_link=True)
+                    )
+                )
+                continue
+            if not targetpage.botMayEdit():
+                pywikibot.warning(
+                    'Target page {} is not editable by bots'.format(
+                        targetpage.title(as_link=True)
+                    )
+                )
+                continue
+
+        if not page.exists():
+            pywikibot.warning(
+                "Page {} doesn't exist".format(
+                    page.title(as_link=True)
+                )
+            )
+            continue
+
+        pywikibot.output('Moving {} to {}...'
+                         .format(page.title(as_link=True,
+                                            force_interwiki=True),
+                                 targetpage.title(as_link=True)))
+
+        pywikibot.log('Getting page text.')
+        text = page.get(get_redirect=True)
+        source_link = page.title(as_link=True, insite=targetpage.site)
+
+        # Preserve content inside <ref>...</ref> and {{...}}
+        refs = re.findall(r'<ref.*?>(.*?)</ref>', text, re.DOTALL)
+        templates = re.findall(r'{{.*?}}', text, re.DOTALL)
+
+        # Remove the <ref>...</ref> and {{...}} content temporarily
+        text_without_refs = re.sub(r'<ref.*?>.*?</ref>', '', text, flags=re.DOTALL)
+        text_without_templates = re.sub(r'{{.*?}}', '', text_without_refs, flags=re.DOTALL)
+
+        try:
+            # Translate the content from English to Bangla using Google Translate
+            translated_text = translator.translate(text_without_templates, src='en', dest='bn').text
+
+            # Check if translation is successful
+            if not translated_text:
+                pywikibot.warning(f"Failed to translate content of {page.title(as_link=True)}")
+                continue
+
+            # Reinsert the <ref>...</ref> and {{...}} content back into the translated text
+            for ref in refs:
+                translated_text = translated_text.replace('</ref>', f' {ref} </ref>', 1)
+            for template in templates:
+                translated_text = translated_text.replace('}}', f' {template} }}', 1)
+
+            # Save the translated content to the target page
+            targetpage.put(translated_text, summary="Transferred and translated from English to Bangla.")  # Using translated text
+
+        except Exception as e:
+            pywikibot.error(f"Translation error for {page.title(as_link=True)}: {e}")
+            continue
+
+
+if __name__ == '__main__':
+    main()
