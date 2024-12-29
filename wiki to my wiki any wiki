@@ -1,0 +1,72 @@
+import pywikibot
+from pywikibot import pagegenerators
+from pywikibot.bot import suggest_help
+from googletrans import Translator
+import re
+
+def main(*args) -> None:
+    local_args = pywikibot.handle_args(args)
+
+    fromsite = pywikibot.Site('hi', 'wikipedia')  # Source: Hindi Wikipedia
+    tolang = "en"  # Target language: English
+    tofamily = "wsour"  # Target family: wsour
+    prefix = ""
+    overwrite = False
+
+    # Initialize the target site
+    tosite = pywikibot.Site(tolang, tofamily)
+
+    # Initialize the Google Translator
+    translator = Translator()
+
+    # Define the category to process
+    category = pywikibot.Category(fromsite, "श्रेणी:जीवित लोग")
+    gen = pagegenerators.CategorizedPageGenerator(category, recurse=False)
+
+    for page in gen:
+        title = page.namespace().canonical_prefix() + page.title(with_ns=False)
+        target_title = prefix + title
+        targetpage = pywikibot.Page(tosite, target_title)
+
+        if targetpage.exists() and not overwrite:
+            pywikibot.warning(f"Skipped {page.title()} (target page exists)")
+            continue
+
+        if not page.exists():
+            pywikibot.warning(f"Page {page.title()} doesn't exist")
+            continue
+
+        pywikibot.output(f"Processing page: {page.title()} -> {targetpage.title()}")
+
+        text = page.text
+
+        # Extract references
+        refs = re.findall(r'(<ref.*?>.*?</ref>)', text, re.DOTALL)
+
+        # Remove references temporarily
+        text_no_refs = re.sub(r'<ref.*?>.*?</ref>', '', text, flags=re.DOTALL)
+
+        try:
+            # Translate main content
+            translated_text = translator.translate(text_no_refs, src='hi', dest='en').text
+
+            if not translated_text:
+                pywikibot.warning(f"Translation failed for {page.title()}")
+                continue
+
+            # Reinsert references
+            for ref in refs:
+                translated_text = translated_text.replace(">", f">{ref}<", 1)
+
+            # Add target category
+            translated_text += "\n\n[[Category:Living people]]"
+
+            # Save the translated content
+            targetpage.put(translated_text, summary="Translated from Hindi Wikipedia to English.")
+        except Exception as e:
+            pywikibot.error(f"Error translating {page.title()}: {e}")
+            continue
+
+
+if __name__ == '__main__':
+    main()
