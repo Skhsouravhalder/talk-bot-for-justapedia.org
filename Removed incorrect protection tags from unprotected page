@@ -1,0 +1,83 @@
+import pywikibot
+import re
+
+class RemoveIncorrectProtectionTagsBot:
+    def __init__(self, site, category_name, templates_to_remove):
+        self.site = site
+        self.category = pywikibot.Category(site, category_name)
+        self.templates_to_remove = templates_to_remove
+
+    def remove_protection_tags(self, page):
+        if not page.exists() or page.isRedirectPage():
+            return
+
+        # Check if the page is actually protected by an admin
+        protection_settings = page.protection()
+        is_admin_protected = any(level == "sysop" for _, level in protection_settings.items())
+
+        if is_admin_protected:
+            pywikibot.output(f"Skipping admin-protected page: {page.title()}")
+            return
+
+        # Remove protection tags/templates if the page is not admin-protected
+        text = page.text
+        original_text = text
+        for template in self.templates_to_remove:
+            # Create a regex to find and remove the template
+            tag_regex = r"{{\s*" + re.escape(template) + r"(?:\|.*?)*}}"
+            text = re.sub(tag_regex, "", text, flags=re.IGNORECASE)
+
+        # If changes are made, update the page
+        if text != original_text:
+            pywikibot.output(f"Updating page: {page.title()}")
+            page.text = text.strip()  # Remove extra spaces left by the tag removal
+            summary = "Removed incorrect protection tags from unprotected page"
+            try:
+                page.save(summary=summary)
+            except pywikibot.exceptions.Error as e:
+                pywikibot.output(f"Error saving page {page.title()}: {e}")
+
+    def run(self):
+        for page in self.category.articles():
+            self.remove_protection_tags(page)
+
+def main():
+    site = pywikibot.Site()  # Connect to your MediaWiki site
+    site.login()
+
+    # Define the category and templates to remove
+    category_name = "Category:Justapedia pages with incorrect protection templates"
+    templates_to_remove = [
+        "Padlock",
+        "Pp-blp",
+        "Pp-dispute",
+        "Pp-extended",
+        "Pp-full",
+        "Pp-move",
+        "Pp-move-dispute",
+        "Pp-move-vandalism",
+        "Pp-office",
+        "Pp-pc",
+        "Pp-protect",
+        "Pp-protected",
+        "PP-protected",
+        "Pp-semi",
+        "Pp-semi-indef",
+        "Pp-semi-prot",
+        "Pp-semi-protect",
+        "Pp-semi-protected",
+        "Pp-semi-protection",
+        "Pp-semiprotected",
+        "Pp-sock",
+        "Pp-template",
+        "Pp-upload",
+        "Pp-usertalk",
+        "Pp-vandalism"
+    ]
+
+    # Create and run the bot
+    bot = RemoveIncorrectProtectionTagsBot(site, category_name, templates_to_remove)
+    bot.run()
+
+if __name__ == "__main__":
+    main()
